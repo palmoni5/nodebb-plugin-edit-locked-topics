@@ -1,0 +1,15 @@
+{
+  "name": "nodebb-plugin-edit-locked-topics",
+  "version": "1.0.0",
+  "description": "Adds a category privilege that allows editing posts inside locked topics.",
+  "main": "library.js",
+  "homepage": "https://github.com/palmoni5/nodebb-plugin-edit-locked-topics#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/palmoni5/nodebb-plugin-edit-locked-topics.git"
+  },
+  "bugs": {
+    "url": "https://github.com/palmoni5/nodebb-plugin-edit-locked-topics/issues"
+  },
+  "license": "GPL-3.0"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "nodebb-plugin-edit-locked-topics",
+  "url": "https://github.com/palmoni5/nodebb-plugin-edit-locked-topics",
+  "hooks": [
+    { "hook": "static:app.load", "method": "init" },
+    { "hook": "static:privileges.categories.init", "method": "addCategoryPrivilege" },
+    { "hook": "filter:privileges.categories.get", "method": "addCategoryPrivilegeState" },
+    { "hook": "filter:privileges.topics.get", "method": "addTopicPrivilegeState" }
+  ],
+  "scripts": [
+    "static/client.js"
+  ],
+  "languages": "languages",
+  "defaultLang": "en-GB"
+}
