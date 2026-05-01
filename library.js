@@ -20,10 +20,25 @@ plugin.init = async function () {
 };
 
 plugin.addCategoryPrivilege = async function ({ privileges }) {
-	privileges.set(PRIVILEGE, {
+	if (privileges.has(PRIVILEGE)) {
+		privileges.delete(PRIVILEGE);
+	}
+
+	const entries = Array.from(privileges.entries());
+	const insertAfterIndex = entries.findIndex(([name]) => name === 'posts:edit');
+	const privilegeData = {
 		label: '[[edit-locked-topics:edit-posts-in-locked-topics]]',
 		type: 'posting',
-	});
+	};
+
+	if (insertAfterIndex === -1) {
+		privileges.set(PRIVILEGE, privilegeData);
+		return;
+	}
+
+	entries.splice(insertAfterIndex + 1, 0, [PRIVILEGE, privilegeData]);
+	privileges.clear();
+	entries.forEach(([name, data]) => privileges.set(name, data));
 };
 
 plugin.addCategoryPrivilegeState = async function (data) {
