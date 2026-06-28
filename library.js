@@ -4,13 +4,11 @@ const plugin = module.exports;
 
 const privileges = require.main.require('./src/privileges');
 const db = require.main.require('./src/database');
-const meta = require.main.require('./src/meta');
 const posts = require.main.require('./src/posts');
 const topics = require.main.require('./src/topics');
 const user = require.main.require('./src/user');
 const plugins = require.main.require('./src/plugins');
 const utils = require.main.require('./src/utils');
-const activitypub = require.main.require('./src/activitypub');
 
 const PRIVILEGE = 'posts:edit_locked';
 
@@ -65,56 +63,50 @@ function patchPostEditPrivilege() {
 		return;
 	}
 
+	const original = privileges.posts.canEdit;
+
+	// Core (src/privileges/posts.js) rejects edits in a locked topic *before* it
+	// fires `filter:privileges.posts.edit`, so the `posts:edit_locked` privilege
+	// cannot be granted from that hook. Instead we delegate to core and intercept
+	// only its specific "topic-locked" rejection, then re-run the exact checks core
+	// performs after the lock gate. All other rules (admin, edit-duration, newbie,
+	// remote handling) stay in core, so they can't drift out of sync on upgrade.
 	privileges.posts.canEdit = async function (pid, uid) {
-		const isRemote = activitypub.helpers.isUri(pid);
+		const result = await original(pid, uid);
+		if (!result || result.flag !== false || result.message !== '[[error:topic-locked]]') {
+			return result;
+		}
+
+		const postData = await posts.getPostFields(pid, ['tid', 'timestamp', 'deleted', 'deleterUid']);
+		const topicData = await topics.getTopicFields(postData.tid, ['cid']);
+		if (!await canEditLockedTopicsInCategory(topicData.cid, uid)) {
+			return result;
+		}
+
+		// The user is allowed to edit locked topics here — replicate core's
+		// post-lock tail (the deleted-post guard, the edit hook and the final flag).
 		const results = await utils.promiseParallel({
-			isAdmin: user.isAdministrator(uid),
 			isMod: posts.isModerator([pid], uid),
 			isOwner: posts.isOwner(pid, uid),
 			isEditor: db.isSetMember(`pid:${pid}:editors`, uid),
 			edit: privileges.posts.can('posts:edit', pid, uid),
-			postData: posts.getPostFields(pid, ['tid', 'timestamp', 'deleted', 'deleterUid']),
 			userData: user.getUserFields(uid, ['reputation']),
 		});
-
 		results.isMod = results.isMod[0];
-		if (results.isAdmin) {
-			return { flag: true };
-		}
+		results.isAdmin = false; // an admin would have returned flag:true before any lock check
+		results.postData = postData;
 
-		if (
-			!isRemote && !results.isMod &&
-			meta.config.postEditDuration &&
-			(Date.now() - results.postData.timestamp > meta.config.postEditDuration * 1000)
-		) {
-			return { flag: false, message: `[[error:post-edit-duration-expired, ${meta.config.postEditDuration}]]` };
-		}
-		if (
-			!isRemote && !results.isMod &&
-			meta.config.newbiePostEditDuration > 0 &&
-			meta.config.newbieReputationThreshold > results.userData.reputation &&
-			Date.now() - results.postData.timestamp > meta.config.newbiePostEditDuration * 1000
-		) {
-			return { flag: false, message: `[[error:post-edit-duration-expired, ${meta.config.newbiePostEditDuration}]]` };
-		}
-
-		const topicData = await topics.getTopicFields(results.postData.tid, ['cid', 'locked']);
-		const editLocked = await canEditLockedTopicsInCategory(topicData.cid, uid);
-		if (!results.isMod && topicData.locked && !editLocked) {
-			return { flag: false, message: '[[error:topic-locked]]' };
-		}
-
-		if (!results.isMod && results.postData.deleted && parseInt(uid, 10) !== parseInt(results.postData.deleterUid, 10)) {
+		if (!results.isMod && postData.deleted && parseInt(uid, 10) !== parseInt(postData.deleterUid, 10)) {
 			return { flag: false, message: '[[error:post-deleted]]' };
 		}
 
 		results.pid = utils.isNumber(pid) ? parseInt(pid, 10) : pid;
 		results.uid = uid;
-		results.editLocked = editLocked;
+		results.editLocked = true;
 
-		const result = await plugins.hooks.fire('filter:privileges.posts.edit', results);
+		const hookResult = await plugins.hooks.fire('filter:privileges.posts.edit', results);
 		return {
-			flag: result.edit && (result.isOwner || result.isEditor || result.isMod),
+			flag: hookResult.edit && (hookResult.isOwner || hookResult.isEditor || hookResult.isMod),
 			message: '[[error:no-privileges]]',
 		};
 	};
