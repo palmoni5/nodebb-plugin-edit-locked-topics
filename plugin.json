@@ -5,7 +5,8 @@
     { "hook": "static:app.load", "method": "init" },
     { "hook": "static:privileges.categories.init", "method": "addCategoryPrivilege" },
     { "hook": "filter:privileges.categories.get", "method": "addCategoryPrivilegeState" },
-    { "hook": "filter:privileges.topics.get", "method": "addTopicPrivilegeState" }
+    { "hook": "filter:privileges.topics.get", "method": "addTopicPrivilegeState" },
+    { "hook": "filter:privileges.posts.edit", "method": "allowEditInLockedTopic" }
   ],
   "scripts": [
     "static/client.js"

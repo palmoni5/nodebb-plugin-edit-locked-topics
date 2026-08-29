@@ -17,6 +17,22 @@ plugin.init = async function () {
 	patchTopicPostDisplay();
 };
 
+// The supported path: core hands us the lock state on
+// `filter:privileges.posts.edit` and honours it when we unset it.
+// Requires NodeBB/NodeBB#14710 — see patchPostEditPrivilege() for the fallback.
+plugin.allowEditInLockedTopic = async function (data) {
+	if (!data.isLocked || !data.postData || !data.postData.tid) {
+		return data;
+	}
+
+	const topicData = await topics.getTopicFields(data.postData.tid, ['cid']);
+	if (await canEditLockedTopicsInCategory(topicData.cid, data.uid)) {
+		data.isLocked = false;
+	}
+
+	return data;
+};
+
 plugin.addCategoryPrivilege = async function ({ privileges }) {
 	if (privileges.has(PRIVILEGE)) {
 		privileges.delete(PRIVILEGE);
@@ -65,12 +81,18 @@ function patchPostEditPrivilege() {
 
 	const original = privileges.posts.canEdit;
 
-	// Core (src/privileges/posts.js) rejects edits in a locked topic *before* it
-	// fires `filter:privileges.posts.edit`, so the `posts:edit_locked` privilege
-	// cannot be granted from that hook. Instead we delegate to core and intercept
-	// only its specific "topic-locked" rejection, then re-run the exact checks core
-	// performs after the lock gate. All other rules (admin, edit-duration, newbie,
-	// remote handling) stay in core, so they can't drift out of sync on upgrade.
+	// Fallback for cores that predate NodeBB/NodeBB#14710, where the locked-topic
+	// rejection happens *before* `filter:privileges.posts.edit` fires and the
+	// `posts:edit_locked` privilege therefore cannot be granted from that hook.
+	// We delegate to core and intercept only its specific "topic-locked"
+	// rejection, then re-run the exact checks core performs after the lock gate.
+	// All other rules (admin, edit-duration, newbie, remote handling) stay in
+	// core, so they can't drift out of sync on upgrade.
+	//
+	// On a core that fires the hook first, `allowEditInLockedTopic` has already
+	// cleared the lock, so `original()` never returns `[[error:topic-locked]]`
+	// for a privileged user and this wrapper is a pass-through. Drop it once the
+	// plugin's minimum supported version includes that change.
 	privileges.posts.canEdit = async function (pid, uid) {
 		const result = await original(pid, uid);
 		if (!result || result.flag !== false || result.message !== '[[error:topic-locked]]') {
